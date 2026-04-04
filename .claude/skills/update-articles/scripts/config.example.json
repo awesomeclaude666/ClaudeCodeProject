@@ -1,0 +1,23 @@
+{
+  "google_sheets": {
+    "credentials_path": "~/.config/gspread/service_account.json",
+    "sheet_id": "YOUR_GOOGLE_SHEET_ID_HERE",
+    "worksheet_name": "Sheet1"
+  },
+  "columns": {
+    "url": "A",
+    "platform": "B",
+    "title": "C",
+    "likes": "D",
+    "comments": "E",
+    "views": "F",
+    "last_updated": "G"
+  },
+  "header_row": 1,
+  "data_start_row": 2,
+  "request_delay_seconds": 1.5,
+  "threads": {
+    "headless": true,
+    "timeout_ms": 30000
+  }
+}
