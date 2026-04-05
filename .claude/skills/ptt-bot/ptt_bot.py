@@ -8,6 +8,7 @@ import time
 import random
 import argparse
 import subprocess
+import socket
 
 try:
     import PyPtt
@@ -53,6 +54,40 @@ def safety_record(action: str, success: bool, target: str = "", error: str = "")
         pass
 
 
+def setup_socks5_proxy(proxy_url: str):
+    """設定 SOCKS5 代理，讓 PyPtt 的 WebSocket 走代理"""
+    try:
+        import socks
+    except ImportError:
+        print(json.dumps({
+            "error": "需要安裝 PySocks: pip3 install PySocks",
+        }, ensure_ascii=False))
+        sys.exit(1)
+
+    # 解析 proxy URL: socks5://user:pass@host:port
+    proxy_url = proxy_url.replace("socks5://", "")
+    username = None
+    password = None
+
+    if "@" in proxy_url:
+        auth, host_port = proxy_url.rsplit("@", 1)
+        if ":" in auth:
+            username, password = auth.split(":", 1)
+    else:
+        host_port = proxy_url
+
+    host, port = host_port.split(":")
+    port = int(port)
+
+    socks.set_default_proxy(
+        socks.SOCKS5, host, port,
+        username=username, password=password,
+    )
+    socket.socket = socks.socksocket
+
+    return {"proxy_host": host, "proxy_port": port}
+
+
 def create_api():
     """建立 PyPtt API 實例（靜音模式）"""
     try:
@@ -73,6 +108,16 @@ def login_ptt():
 
     if not username or not password:
         return None, {"error": "缺少環境變數 PTT_USERNAME 和/或 PTT_PASSWORD"}
+
+    # 檢查是否有設定 proxy
+    proxy = os.environ.get("PTT_PROXY", "")
+    if proxy:
+        try:
+            proxy_info = setup_socks5_proxy(proxy)
+            print(f"已設定 SOCKS5 代理: {proxy_info['proxy_host']}:{proxy_info['proxy_port']}",
+                  file=sys.stderr)
+        except Exception as e:
+            return None, {"error": f"代理設定失敗: {str(e)}"}
 
     ptt = create_api()
     try:

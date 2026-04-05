@@ -11,7 +11,9 @@ argument-hint: <操作指令，例如：發文到 Gossiping、推文、監測 NB
 ## 前置需求
 
 - Python 3 已安裝 `PyPtt` 套件（`pip3 install PyPtt`）
+- Python 3 已安裝 `PySocks` 套件（`pip3 install PySocks`，使用代理時需要）
 - 用戶提供 PTT 帳號和密碼（每次執行時提供，不儲存）
+- （可選）SOCKS5 代理帳號，用於更換登入 IP
 
 ## 使用方式
 
@@ -26,9 +28,20 @@ argument-hint: <操作指令，例如：發文到 Gossiping、推文、監測 NB
 
 ## 執行步驟
 
-### 共通：取得帳號密碼
+### 共通：取得帳號密碼與代理設定
 
 每次執行前，先詢問用戶的 PTT 帳號和密碼。收到後以 inline 環境變數方式傳入指令。
+
+如果用戶要求使用代理（換 IP），加上 `PTT_PROXY` 環境變數：
+```bash
+PTT_PROXY="socks5://user:pass@host:port" PTT_USERNAME="帳號" PTT_PASSWORD="密碼" python3 ${CLAUDE_SKILL_DIR}/ptt_bot.py test
+```
+
+支援的代理格式：
+- `socks5://host:port`（無認證）
+- `socks5://user:pass@host:port`（帳密認證）
+
+推薦使用台灣住宅代理（如 IPRoyal），每次連線自動取得不同台灣 IP。
 
 ### 模式 A：發文
 
@@ -146,9 +159,23 @@ PTT_USERNAME="帳號" PTT_PASSWORD="密碼" python3 ${CLAUDE_SKILL_DIR}/ptt_bot.
 7. **用戶確認**：每次發文和推文前都要讓用戶確認內容
 8. **帳密不保存**：帳號密碼僅在指令中以 inline 環境變數傳入，不寫入檔案
 
+## 代理（Proxy）設定
+
+支援透過 SOCKS5 代理連線 PTT，用於更換登入 IP。
+
+設定方式：加上 `PTT_PROXY` 環境變數：
+```bash
+PTT_PROXY="socks5://user:pass@geo.iproyal.com:32325" \
+PTT_USERNAME="帳號" PTT_PASSWORD="密碼" \
+python3 ${CLAUDE_SKILL_DIR}/ptt_bot.py test
+```
+
+推薦使用台灣住宅代理服務（如 IPRoyal），每次連線自動分配不同的台灣家用 IP。
+
 ## 注意事項
 
 - PTT 帳號密碼每次都要問用戶，不要嘗試從環境變數或檔案中讀取
+- 如果用戶有提供代理資訊，加上 `PTT_PROXY` 環境變數
 - 發文需要看板的發文權限，部分看板有限制
 - 推文內容上限約 45 個中文字
 - PTT 系統本身也有推文間隔限制（約 5 秒），安全模組的間隔更為保守
