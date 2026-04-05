@@ -79,19 +79,19 @@ function _threadsCheckReplyReady() {
     _threadsPatrolResult = 'REPLY_NOT_READY';
 }
 
-/* ACTION: focus_reply - 聚焦回覆區域的 contenteditable（用於剪貼簿貼上前） */
-/* 注意：不再使用 execCommand('insertText')，因為它不會觸發 React 狀態更新 */
-/* 改用此函式聚焦後，由 shell 腳本透過 pbcopy + Cmd+V 貼上文字 */
+/* ACTION: focus_reply - 聚焦文章主體的回覆區 contenteditable（用於剪貼簿貼上前） */
+/* 注意：選擇位置最上方（minY）的 contenteditable，那是文章主體的回覆輸入區 */
+/* 而非最下方的（那通常是別人留言的回覆區） */
 function _threadsFocusReplyEditable() {
     var editables = document.querySelectorAll('[contenteditable="true"]');
     var target = null;
-    var maxY = -1;
+    var minY = 999999;
 
-    /* 選擇位置最低的可見 contenteditable（通常是回覆輸入區） */
+    /* 選擇位置最上方的可見 contenteditable（文章主體的回覆區） */
     for (var i = 0; i < editables.length; i++) {
         var rect = editables[i].getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0 && rect.y > maxY) {
-            maxY = rect.y;
+        if (rect.width > 0 && rect.height > 0 && rect.y < minY) {
+            minY = rect.y;
             target = editables[i];
         }
     }
@@ -169,19 +169,20 @@ function _threadsSubmitReply() {
     _threadsPatrolResult = 'REPLY_SUBMIT_NOT_FOUND';
 }
 
-/* ACTION: verify_reply - 驗證留言是否成功 */
+/* ACTION: verify_reply - 驗證留言是否成功（基本檢查：錯誤彈窗 + 輸入區清空） */
+/* 注意：只檢查 role="alert" 或小型錯誤提示元素，不掃描整頁 span 以免誤判 */
 function _threadsVerifyReply() {
-    var spans = document.querySelectorAll('span[dir="auto"]');
-    for (var i = 0; i < spans.length; i++) {
-        var t = spans[i].textContent.trim();
-        if (t.indexOf('錯誤') >= 0 || t.indexOf('error') >= 0
-            || t.indexOf('Error') >= 0 || t.indexOf('失敗') >= 0
-            || t.indexOf('無法') >= 0) {
+    /* 策略 1: 檢查 role="alert" 錯誤提示 */
+    var alerts = document.querySelectorAll('[role="alert"], [role="alertdialog"]');
+    for (var i = 0; i < alerts.length; i++) {
+        var t = alerts[i].textContent.trim();
+        if (t.length > 0 && t.length < 200) {
             _threadsPatrolResult = 'REPLY_ERROR:' + t.substring(0, 100);
             return;
         }
     }
 
+    /* 策略 2: 檢查輸入區是否已清空（表示送出成功） */
     var editables = document.querySelectorAll('[contenteditable="true"]');
     for (var j = 0; j < editables.length; j++) {
         var rect = editables[j].getBoundingClientRect();
@@ -195,4 +196,68 @@ function _threadsVerifyReply() {
     }
 
     _threadsPatrolResult = 'REPLY_SUCCESS';
+}
+
+/* ACTION: check_duplicate - 留言前檢查是否已有相同內容的留言 */
+/* 用留言文字的前 10 個字搜尋頁面上所有回覆，如果找到就表示重複 */
+function _threadsCheckDuplicate(searchText) {
+    if (!searchText || searchText.length === 0) {
+        _threadsPatrolResult = 'DUP_NO_TEXT';
+        return;
+    }
+
+    var keyword = searchText.substring(0, 10).replace(/\s+/g, ' ').trim();
+    if (keyword.length < 3) {
+        _threadsPatrolResult = 'DUP_NOT_FOUND';
+        return;
+    }
+
+    /* 搜尋所有 span[dir="auto"]，跳過第一個貼文容器（OP 內容） */
+    var containers = document.querySelectorAll('[data-pressable-container="true"]');
+    var opContainer = containers.length > 0 ? containers[0] : null;
+
+    var spans = document.querySelectorAll('span[dir="auto"]');
+    for (var i = 0; i < spans.length; i++) {
+        /* 跳過 OP 貼文容器內的 span */
+        if (opContainer && opContainer.contains(spans[i])) continue;
+
+        var t = spans[i].textContent.trim();
+        if (t.indexOf(keyword) >= 0) {
+            _threadsPatrolResult = 'DUP_FOUND:' + t.substring(0, 50);
+            return;
+        }
+    }
+
+    _threadsPatrolResult = 'DUP_NOT_FOUND';
+}
+
+/* ACTION: verify_reply_content - 重新載入頁面後驗證留言文字是否真的出現 */
+/* 參數 searchText 由 shell 動態注入 */
+function _threadsVerifyReplyContent(searchText) {
+    if (!searchText || searchText.length === 0) {
+        _threadsPatrolResult = 'VERIFY_NO_SEARCH_TEXT';
+        return;
+    }
+
+    /* 取前 15 個字作為搜尋關鍵字（避免換行或特殊字元干擾） */
+    var keyword = searchText.substring(0, 15).replace(/\s+/g, ' ').trim();
+
+    /* 搜尋所有 span[dir="auto"] 中是否包含我們的留言文字 */
+    var spans = document.querySelectorAll('span[dir="auto"]');
+    for (var i = 0; i < spans.length; i++) {
+        var t = spans[i].textContent.trim();
+        if (t.indexOf(keyword) >= 0) {
+            _threadsPatrolResult = 'VERIFY_FOUND';
+            return;
+        }
+    }
+
+    /* 備用：搜尋所有可見文字節點 */
+    var allText = document.body.innerText || '';
+    if (allText.indexOf(keyword) >= 0) {
+        _threadsPatrolResult = 'VERIFY_FOUND';
+        return;
+    }
+
+    _threadsPatrolResult = 'VERIFY_NOT_FOUND';
 }

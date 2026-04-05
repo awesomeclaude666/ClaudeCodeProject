@@ -1,13 +1,53 @@
 #!/usr/bin/env python3
-"""Threads API 貼文管理 CLI — 發文、回覆、查看、搜尋"""
+"""Threads API 貼文管理 CLI — 發文、回覆、查看、搜尋、反查 ID、對話串"""
 
 import os
 import sys
 import json
 import time
+import random
+import subprocess
 import argparse
 
 import requests
+
+SAFETY_MODULE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "..", "threads-safety", "threads_safety.py"
+)
+
+RATE_LIMIT_CODES = {4, 32, 613, 80004}
+
+
+def safety_check(action: str, skill: str = "threads-poster"):
+    """執行全域安全預檢"""
+    if not os.path.exists(SAFETY_MODULE):
+        return {"allowed": True, "wait_seconds": 0}
+    try:
+        result = subprocess.run(
+            [sys.executable, SAFETY_MODULE, "check", "--action", action, "--skill", skill],
+            capture_output=True, text=True, timeout=10,
+        )
+        return json.loads(result.stdout)
+    except Exception:
+        return {"allowed": True, "wait_seconds": 0}
+
+
+def safety_record(action: str, success: bool, skill: str = "threads-poster",
+                   target: str = "", error: str = ""):
+    """記錄操作結果到全域安全模組"""
+    if not os.path.exists(SAFETY_MODULE):
+        return
+    try:
+        subprocess.run(
+            [sys.executable, SAFETY_MODULE, "record",
+             "--action", action, "--skill", skill,
+             "--success", "true" if success else "false",
+             "--target", target, "--error", error],
+            capture_output=True, text=True, timeout=10,
+        )
+    except Exception:
+        pass
 
 
 class ThreadsAPI:
@@ -32,6 +72,10 @@ class ThreadsAPI:
             error_msg = error_info.get("message", resp.reason)
             error_code = error_info.get("code", 0)
             error_type = error_info.get("type", "unknown")
+
+            if error_code in RATE_LIMIT_CODES:
+                safety_record("reply", success=False, error=f"rate_limit:{error_code}")
+
             raise RuntimeError(
                 json.dumps({
                     "api_error": True,
@@ -62,16 +106,18 @@ class ThreadsAPI:
     def post_thread(self, text: str) -> dict:
         print("建立貼文容器...", file=sys.stderr)
         container_id = self.create_container(text)
-        print(f"容器已建立 (id: {container_id})，等待 {self.PUBLISH_WAIT_SECONDS} 秒...", file=sys.stderr)
-        time.sleep(self.PUBLISH_WAIT_SECONDS)
+        wait = self.PUBLISH_WAIT_SECONDS + random.uniform(5, 15)
+        print(f"容器已建立 (id: {container_id})，等待 {wait:.0f} 秒...", file=sys.stderr)
+        time.sleep(wait)
         print("發布中...", file=sys.stderr)
         return self.publish_container(container_id)
 
     def reply_to_thread(self, text: str, reply_to_id: str) -> dict:
         print(f"建立回覆容器 (reply_to: {reply_to_id})...", file=sys.stderr)
         container_id = self.create_container(text, reply_to_id=reply_to_id)
-        print(f"容器已建立 (id: {container_id})，等待 {self.PUBLISH_WAIT_SECONDS} 秒...", file=sys.stderr)
-        time.sleep(self.PUBLISH_WAIT_SECONDS)
+        wait = self.PUBLISH_WAIT_SECONDS + random.uniform(5, 15)
+        print(f"容器已建立 (id: {container_id})，等待 {wait:.0f} 秒...", file=sys.stderr)
+        time.sleep(wait)
         print("發布回覆中...", file=sys.stderr)
         return self.publish_container(container_id)
 
@@ -96,18 +142,45 @@ class ThreadsAPI:
         })
         return result.get("data", [])
 
+    def get_conversation(self, thread_id: str) -> list:
+        """取得貼文的完整對話串（含巢狀回覆）"""
+        result = self._request("GET", f"{thread_id}/conversation", {
+            "fields": "id,text,username,timestamp",
+        })
+        return result.get("data", [])
+
 
 def output_json(data: dict):
     print(json.dumps(data, ensure_ascii=False, indent=2))
 
 
 def cmd_post(api: ThreadsAPI, args) -> dict:
+    check = safety_check("post")
+    if not check.get("allowed", True):
+        return {"action": "post", "success": False, "safety_block": True,
+                "reason": check.get("reason", "")}
+    wait = check.get("wait_seconds", 0)
+    if wait > 0:
+        print(f"安全等待 {wait:.0f} 秒...", file=sys.stderr)
+        time.sleep(wait)
+
     result = api.post_thread(args.text)
+    safety_record("post", success=True, target=result.get("id", ""))
     return {"action": "post", "success": True, "post_id": result.get("id"), "text": args.text}
 
 
 def cmd_reply(api: ThreadsAPI, args) -> dict:
+    check = safety_check("reply")
+    if not check.get("allowed", True):
+        return {"action": "reply", "success": False, "safety_block": True,
+                "reason": check.get("reason", "")}
+    wait = check.get("wait_seconds", 0)
+    if wait > 0:
+        print(f"安全等待 {wait:.0f} 秒...", file=sys.stderr)
+        time.sleep(wait)
+
     result = api.reply_to_thread(args.text, args.post_id)
+    safety_record("reply", success=True, target=args.post_id)
     return {"action": "reply", "success": True, "reply_id": result.get("id"),
             "reply_to": args.post_id, "text": args.text}
 
@@ -132,6 +205,30 @@ def cmd_replies(api: ThreadsAPI, args) -> dict:
     return {"action": "replies", "thread_id": args.thread_id, "count": len(replies), "replies": replies}
 
 
+def cmd_get_id(api: ThreadsAPI, args) -> dict:
+    """從貼文文字內容反查 media ID"""
+    search_text = args.search_text
+    posts = api.list_threads(25)
+
+    for post in posts:
+        post_text = post.get("text", "")
+        if search_text[:30] in post_text or post_text[:30] in search_text:
+            return {"action": "get_id", "success": True,
+                    "media_id": post["id"], "text": post_text[:80],
+                    "timestamp": post.get("timestamp", "")}
+
+    return {"action": "get_id", "success": False,
+            "error": f"找不到包含 '{search_text[:30]}...' 的貼文",
+            "searched": len(posts)}
+
+
+def cmd_conversation(api: ThreadsAPI, args) -> dict:
+    """取得貼文的完整對話串"""
+    conversation = api.get_conversation(args.thread_id)
+    return {"action": "conversation", "thread_id": args.thread_id,
+            "count": len(conversation), "messages": conversation}
+
+
 def main():
     parser = argparse.ArgumentParser(description="Threads API 貼文管理")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -154,6 +251,12 @@ def main():
     p_replies = subparsers.add_parser("replies", help="查看貼文回覆")
     p_replies.add_argument("thread_id", help="貼文 ID")
 
+    p_get_id = subparsers.add_parser("get_id", help="從貼文文字反查 media ID")
+    p_get_id.add_argument("search_text", help="貼文文字內容（前 30 字即可）")
+
+    p_conversation = subparsers.add_parser("conversation", help="取得完整對話串")
+    p_conversation.add_argument("thread_id", help="貼文 ID")
+
     args = parser.parse_args()
 
     token = os.environ.get("THREADS_ACCESS_TOKEN", "")
@@ -171,6 +274,8 @@ def main():
         "search": cmd_search,
         "profile": cmd_profile,
         "replies": cmd_replies,
+        "get_id": cmd_get_id,
+        "conversation": cmd_conversation,
     }
 
     try:
@@ -179,11 +284,13 @@ def main():
     except RuntimeError as e:
         try:
             error_data = json.loads(str(e))
+            safety_record(args.command, success=False, error=str(e))
             output_json({"action": args.command, "success": False, **error_data})
         except json.JSONDecodeError:
             output_json({"action": args.command, "success": False, "error": str(e)})
         sys.exit(1)
     except Exception as e:
+        safety_record(args.command, success=False, error=str(e))
         output_json({"action": args.command, "success": False, "error": str(e)})
         sys.exit(1)
 

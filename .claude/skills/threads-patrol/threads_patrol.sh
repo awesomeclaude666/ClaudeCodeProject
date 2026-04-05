@@ -24,6 +24,12 @@ REPLY_JS="$SCRIPT_DIR/threads_reply_actions.js"
 python3 -c "
 import subprocess, sys, json, time
 
+def random_sleep(low, high):
+    \"\"\"隨機延遲，模擬人類行為\"\"\"
+    import random
+    delay = random.uniform(low, high)
+    time.sleep(delay)
+
 mode = sys.argv[1]
 target = sys.argv[2]
 reply_text = sys.argv[3] if len(sys.argv) > 3 else ''
@@ -58,13 +64,13 @@ def navigate_to(url):
     if 'TAB_NOT_FOUND' in result:
         return False
     # 等待頁面載入
-    time.sleep(5)
+    random_sleep(3, 8)
     for _ in range(10):
         ready = run_applescript('document.readyState')
         if 'complete' in ready:
             break
-        time.sleep(1)
-    time.sleep(2)
+        random_sleep(0.8, 2.5)
+    random_sleep(1.5, 4)
     return True
 
 def output(success, data='', error='', step=''):
@@ -88,7 +94,7 @@ if mode == 'read':
     with open('$READ_JS', 'r') as f:
         read_code = f.read()
     run_applescript(read_code)
-    time.sleep(1)
+    random_sleep(0.8, 2.5)
     result = run_applescript('_threadsPatrolResult')
 
     if 'POST_CONTENT' in result:
@@ -113,13 +119,13 @@ elif mode == 'discover':
     # 滾動載入更多貼文
     for _ in range(3):
         run_applescript('window.scrollTo(0, document.body.scrollHeight)')
-        time.sleep(2)
+        random_sleep(1.5, 4)
 
     # 執行發現 JS
     with open('$DISCOVER_JS', 'r') as f:
         discover_code = f.read()
     run_applescript(discover_code)
-    time.sleep(1)
+    random_sleep(0.8, 2.5)
     result = run_applescript('_threadsPatrolResult')
 
     if result and result != '0' and '|||' in result:
@@ -145,38 +151,50 @@ elif mode == 'reply':
     with open('$REPLY_JS', 'r') as f:
         reply_code = f.read()
     run_applescript(reply_code)
-    time.sleep(1)
+    random_sleep(0.8, 2.5)
+
+    # 重複留言檢查：在留言前先確認頁面上沒有相同內容
+    dup_keyword = ''.join(c for c in reply_text[:10] if c.isalnum() or c == ' ')
+    if len(dup_keyword) >= 3:
+        dup_js = f'_threadsCheckDuplicate(\"{dup_keyword}\"); _threadsPatrolResult'
+        run_applescript(dup_js)
+        random_sleep(0.8, 2.5)
+        dup_result = run_applescript('_threadsPatrolResult')
+        if 'DUP_FOUND' in str(dup_result):
+            dup_text = dup_result.split('DUP_FOUND:', 1)[1] if 'DUP_FOUND:' in str(dup_result) else ''
+            output(False, error=f'偵測到重複留言，頁面上已有類似內容：{dup_text}', step='duplicate_check')
+            sys.exit(1)
 
     # 點擊回覆區域
     run_applescript('_threadsClickReply(); _threadsPatrolResult')
-    time.sleep(1)
+    random_sleep(0.8, 2.5)
     result = run_applescript('_threadsPatrolResult')
 
     if 'REPLY_NOT_FOUND' in str(result):
         # 嘗試滾動後重試
         run_applescript('window.scrollTo(0, document.body.scrollHeight)')
-        time.sleep(2)
+        random_sleep(1.5, 4)
         run_applescript('_threadsClickReply(); _threadsPatrolResult')
-        time.sleep(1)
+        random_sleep(0.8, 2.5)
         result = run_applescript('_threadsPatrolResult')
         if 'REPLY_NOT_FOUND' in str(result):
             output(False, error='找不到回覆區域，請確認貼文頁面已完整載入', step='click_reply')
             sys.exit(1)
 
-    time.sleep(2)
+    random_sleep(1.5, 4)
 
     # 確認回覆區域就緒
     for attempt in range(3):
         run_applescript('_threadsCheckReplyReady(); _threadsPatrolResult')
-        time.sleep(0.5)
+        random_sleep(0.8, 2.5)
         result = run_applescript('_threadsPatrolResult')
         if 'REPLY_READY' in str(result):
             break
-        time.sleep(2)
+        random_sleep(1.5, 4)
 
     # 聚焦回覆輸入區域
     run_applescript('_threadsFocusReplyEditable(); _threadsPatrolResult')
-    time.sleep(0.5)
+    random_sleep(0.8, 2.5)
     result = run_applescript('_threadsPatrolResult')
 
     if 'REPLY_EDITABLE_NOT_FOUND' in str(result):
@@ -195,11 +213,11 @@ tell application \"System Events\"
 end tell
 '''
     subprocess.run(['osascript', '-e', paste_script], capture_output=True, text=True)
-    time.sleep(2)
+    random_sleep(1.5, 4)
 
     # 送出留言
     run_applescript('_threadsSubmitReply(); _threadsPatrolResult')
-    time.sleep(1)
+    random_sleep(0.8, 2.5)
     result = run_applescript('_threadsPatrolResult')
 
     if 'REPLY_SUBMIT_NOT_FOUND' in str(result):
@@ -209,7 +227,7 @@ end tell
     if 'REPLY_SUBMIT_DISABLED' in str(result):
         # 按鈕停用，嘗試重新貼上
         run_applescript('_threadsFocusReplyEditable(); _threadsPatrolResult')
-        time.sleep(0.5)
+        random_sleep(0.8, 2.5)
         select_paste_script = '''
 tell application \"Google Chrome\" to activate
 delay 0.3
@@ -220,28 +238,49 @@ tell application \"System Events\"
 end tell
 '''
         subprocess.run(['osascript', '-e', select_paste_script], capture_output=True, text=True)
-        time.sleep(2)
+        random_sleep(1.5, 4)
         run_applescript('_threadsSubmitReply(); _threadsPatrolResult')
-        time.sleep(1)
+        random_sleep(0.8, 2.5)
         result = run_applescript('_threadsPatrolResult')
         if 'REPLY_SUBMITTED' not in str(result):
             output(False, error='送出按鈕停用，請確認 Chrome 在前景並重試', step='submit')
             sys.exit(1)
 
-    time.sleep(3)
+    random_sleep(2, 6)
 
-    # 驗證
+    # 基本驗證（錯誤訊息檢查）
     run_applescript('_threadsVerifyReply(); _threadsPatrolResult')
-    time.sleep(1)
+    random_sleep(0.8, 2.5)
     result = run_applescript('_threadsPatrolResult')
 
-    if 'REPLY_SUCCESS' in str(result):
-        output(True, data='留言成功！', step='done')
-    elif 'REPLY_ERROR' in str(result):
+    if 'REPLY_ERROR' in str(result):
         error_msg = result.split('REPLY_ERROR:', 1)[1] if 'REPLY_ERROR:' in str(result) else '未知錯誤'
         output(False, error=f'留言出現錯誤：{error_msg}', step='verify')
+        sys.exit(1)
+
+    # 內容驗證：重新載入頁面，確認留言文字真的出現
+    random_sleep(1.5, 4)
+    navigate_to(target)
+
+    # 重新注入 JS functions
+    with open('$REPLY_JS', 'r') as f:
+        reply_code_reload = f.read()
+    run_applescript(reply_code_reload)
+    random_sleep(0.8, 2.5)
+
+    # 用留言文字前 15 字搜尋（只保留字母數字和空格，避免跳脫問題）
+    search_keyword = ''.join(c for c in reply_text[:15] if c.isalnum() or c == ' ')
+    verify_js = f'_threadsVerifyReplyContent(\"{search_keyword}\"); _threadsPatrolResult'
+    run_applescript(verify_js)
+    random_sleep(0.8, 2.5)
+    result = run_applescript('_threadsPatrolResult')
+
+    if 'VERIFY_FOUND' in str(result):
+        output(True, data='留言成功（已驗證出現在頁面上）！', step='done')
+    elif 'VERIFY_NOT_FOUND' in str(result):
+        output(False, error='留言未出現在頁面上，可能送出失敗。請檢查 Chrome 是否在前景、Threads 是否正常。', step='verify_content')
     else:
-        output(True, data='留言已送出（請確認 Threads 上是否出現）', step='done')
+        output(False, error=f'驗證異常: {result}', step='verify_content')
 
 else:
     output(False, error=f'不支援的模式: {mode}，請使用 read / reply / discover')

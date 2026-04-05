@@ -32,6 +32,12 @@ fi
 python3 -c "
 import subprocess, sys, json, time
 
+def random_sleep(low, high):
+    \"\"\"隨機延遲，模擬人類行為\"\"\"
+    import random
+    delay = random.uniform(low, high)
+    time.sleep(delay)
+
 post_text = sys.argv[1]
 js_file = sys.argv[2]
 
@@ -79,13 +85,13 @@ if result == 'TAB_NOT_FOUND':
 result = run_applescript('_threadsClickCompose(); _threadsPostResult')
 
 if 'COMPOSE_NOT_FOUND' in str(result):
-    time.sleep(2)
+    random_sleep(1.5, 4)
     result = run_applescript('_threadsClickCompose(); _threadsPostResult')
     if 'COMPOSE_NOT_FOUND' in str(result):
         output(False, '找不到撰寫按鈕，請確認 Threads 首頁已載入完成', 'compose')
         sys.exit(1)
 
-time.sleep(2)
+random_sleep(1.5, 4)
 
 # Step 3: 檢查 modal 是否開啟
 modal_ready = False
@@ -94,13 +100,13 @@ for attempt in range(5):
     if 'MODAL_READY' in str(result):
         modal_ready = True
         break
-    time.sleep(2)
+    random_sleep(1.5, 4)
 
 if not modal_ready:
     output(False, '撰寫視窗未開啟，請重試', 'modal')
     sys.exit(1)
 
-time.sleep(1)
+random_sleep(0.8, 2.5)
 
 # Step 4: 聚焦文字輸入區域
 result = run_applescript('_threadsFocusEditable(); _threadsPostResult')
@@ -109,7 +115,7 @@ if 'EDITABLE_NOT_FOUND' in str(result):
     output(False, '找不到文字輸入區域', 'focus')
     sys.exit(1)
 
-time.sleep(0.5)
+random_sleep(0.3, 1.0)
 
 # Step 5: 用剪貼簿貼上文字
 # 這是最關鍵的步驟：使用 pbcopy + Cmd+V 才能正確觸發 React 狀態更新
@@ -124,7 +130,7 @@ tell application \"System Events\"
 end tell
 '''
 subprocess.run(['osascript', '-e', paste_script], capture_output=True, text=True)
-time.sleep(2)
+random_sleep(1.5, 4)
 
 # Step 6: 點擊發佈
 result = run_applescript('_threadsClickPost(); _threadsPostResult')
@@ -137,7 +143,7 @@ if 'POST_BUTTON_DISABLED' in str(result):
     # 按鈕停用，文字可能未正確輸入，嘗試重新貼上
     # 重新聚焦
     run_applescript('_threadsFocusEditable(); _threadsPostResult')
-    time.sleep(0.5)
+    random_sleep(0.3, 1.0)
     # 先選全部再貼上覆蓋
     select_paste_script = '''
 tell application \"Google Chrome\" to activate
@@ -149,7 +155,7 @@ tell application \"System Events\"
 end tell
 '''
     subprocess.run(['osascript', '-e', select_paste_script], capture_output=True, text=True)
-    time.sleep(2)
+    random_sleep(1.5, 4)
 
     # 再試一次點擊發佈
     result = run_applescript('_threadsClickPost(); _threadsPostResult')
@@ -157,7 +163,7 @@ end tell
         output(False, '發佈按鈕停用，文字可能未正確輸入。請確認 Chrome 在前景並重試', 'post')
         sys.exit(1)
 
-time.sleep(3)
+random_sleep(2, 6)
 
 # Step 7: 驗證
 result = run_applescript('_threadsVerifyPost(); _threadsPostResult')

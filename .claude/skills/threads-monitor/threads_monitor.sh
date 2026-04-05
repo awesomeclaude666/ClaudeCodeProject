@@ -109,7 +109,10 @@ osascript -e "display notification \"開始監測，目前 ${CURRENT_COUNT} 則�
 
 # 主迴圈
 while true; do
-    sleep "$CHECK_INTERVAL"
+    JITTER=$((RANDOM % 60 - 30))
+    ACTUAL_INTERVAL=$((CHECK_INTERVAL + JITTER))
+    if [ "$ACTUAL_INTERVAL" -lt 30 ]; then ACTUAL_INTERVAL=30; fi
+    sleep "$ACTUAL_INTERVAL"
 
     RESULT=$(get_replies)
     TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
